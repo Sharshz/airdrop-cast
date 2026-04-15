@@ -51,7 +51,11 @@ interface Campaign {
   rewardPerParticipant: number;
   maxParticipants: number;
   currentParticipants: number;
-  recastTask?: string;
+  tasks?: {
+    recast?: string;
+    like?: string;
+    follow?: string;
+  };
   status: 'active' | 'completed';
   createdAt: any;
 }
@@ -81,7 +85,11 @@ export default function App() {
     totalReward: 0,
     rewardPerParticipant: 0,
     maxParticipants: 100,
-    recastTask: '',
+    tasks: {
+      recast: '',
+      like: '',
+      follow: '',
+    },
   });
 
   const [joiningCampaignId, setJoiningCampaignId] = useState<string | null>(null);
@@ -90,7 +98,8 @@ export default function App() {
     isOpen: boolean;
     campaignTitle: string;
     position: number;
-  }>({ isOpen: false, campaignTitle: '', position: 0 });
+    maxParticipants: number;
+  }>({ isOpen: false, campaignTitle: '', position: 0, maxParticipants: 0 });
   const [resultsModalData, setResultsModalData] = useState<{
     isOpen: boolean;
     campaign: Campaign | null;
@@ -143,9 +152,22 @@ export default function App() {
     if (!user) return toast.error('Please login first');
     if (!isConnected) return toast.error('Please connect wallet');
 
+    // Validation
+    if (!newCampaign.title.trim()) return toast.error('Title is required');
+    if (!newCampaign.tokenAddress.startsWith('0x')) return toast.error('Invalid token address');
+    if (newCampaign.totalReward <= 0) return toast.error('Total reward must be greater than 0');
+    if (newCampaign.maxParticipants <= 0) return toast.error('Max participants must be greater than 0');
+
     try {
+      // Clean up tasks object (remove empty strings)
+      const cleanedTasks: any = {};
+      if (newCampaign.tasks.recast?.trim()) cleanedTasks.recast = newCampaign.tasks.recast.trim();
+      if (newCampaign.tasks.like?.trim()) cleanedTasks.like = newCampaign.tasks.like.trim();
+      if (newCampaign.tasks.follow?.trim()) cleanedTasks.follow = newCampaign.tasks.follow.trim();
+
       const campaignData = {
         ...newCampaign,
+        tasks: cleanedTasks,
         creatorId: user.uid,
         currentParticipants: 0,
         status: 'active',
@@ -162,7 +184,11 @@ export default function App() {
         totalReward: 0,
         rewardPerParticipant: 0,
         maxParticipants: 100,
-        recastTask: '',
+        tasks: {
+          recast: '',
+          like: '',
+          follow: '',
+        },
       });
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'campaigns');
@@ -207,7 +233,8 @@ export default function App() {
       setShareModalData({
         isOpen: true,
         campaignTitle: campaign.title,
-        position: position
+        position: position,
+        maxParticipants: campaign.maxParticipants
       });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `campaigns/${campaignId}/participants/${user.uid}`);
@@ -413,14 +440,61 @@ export default function App() {
                       onChange={e => setNewCampaign({...newCampaign, rewardPerParticipant: Number(e.target.value)})}
                     />
                   </div>
-                  <div className="space-y-2">
-                    <Label>Recast Task (Cast URL or ID) - Optional</Label>
-                    <Input 
-                      placeholder="https://warpcast.com/..." 
-                      className="bg-white/5 border-white/10"
-                      value={newCampaign.recastTask}
-                      onChange={e => setNewCampaign({...newCampaign, recastTask: e.target.value})}
-                    />
+                  <div className="space-y-4 pt-4 border-t border-white/5">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Users className="w-4 h-4 text-purple-500" />
+                      <span className="text-xs font-bold uppercase tracking-widest">Social Tasks (Optional)</span>
+                    </div>
+                    
+                    <div className="space-y-3">
+                      <div className="space-y-2">
+                        <Label className="text-xs opacity-60">Recast Cast URL</Label>
+                        <div className="relative">
+                          <Repeat className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-purple-500" />
+                          <Input 
+                            placeholder="https://warpcast.com/..." 
+                            className="bg-white/5 border-white/10 pl-10"
+                            value={newCampaign.tasks.recast}
+                            onChange={e => setNewCampaign({
+                              ...newCampaign, 
+                              tasks: { ...newCampaign.tasks, recast: e.target.value }
+                            })}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label className="text-xs opacity-60">Like Cast URL</Label>
+                        <div className="relative">
+                          <Heart className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-pink-500" />
+                          <Input 
+                            placeholder="https://warpcast.com/..." 
+                            className="bg-white/5 border-white/10 pl-10"
+                            value={newCampaign.tasks.like}
+                            onChange={e => setNewCampaign({
+                              ...newCampaign, 
+                              tasks: { ...newCampaign.tasks, like: e.target.value }
+                            })}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label className="text-xs opacity-60">Follow User (FID or Username)</Label>
+                        <div className="relative">
+                          <Users className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-500" />
+                          <Input 
+                            placeholder="@username or FID" 
+                            className="bg-white/5 border-white/10 pl-10"
+                            value={newCampaign.tasks.follow}
+                            onChange={e => setNewCampaign({
+                              ...newCampaign, 
+                              tasks: { ...newCampaign.tasks, follow: e.target.value }
+                            })}
+                          />
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
                 <DialogFooter>
@@ -518,10 +592,22 @@ export default function App() {
                           </div>
                         </div>
 
-                        {campaign.recastTask && (
+                        {campaign.tasks?.recast && (
                           <div className="flex items-center gap-2 p-2 bg-purple-500/5 rounded-lg border border-purple-500/10">
                             <Repeat className="w-3 h-3 text-purple-500" />
                             <span className="text-[10px] font-bold text-purple-400 uppercase tracking-tighter">Recast Boost Active</span>
+                          </div>
+                        )}
+                        {campaign.tasks?.like && (
+                          <div className="flex items-center gap-2 p-2 bg-pink-500/5 rounded-lg border border-pink-500/10">
+                            <Heart className="w-3 h-3 text-pink-500" />
+                            <span className="text-[10px] font-bold text-pink-400 uppercase tracking-tighter">Like Boost Active</span>
+                          </div>
+                        )}
+                        {campaign.tasks?.follow && (
+                          <div className="flex items-center gap-2 p-2 bg-blue-500/5 rounded-lg border border-blue-500/10">
+                            <Users className="w-3 h-3 text-blue-500" />
+                            <span className="text-[10px] font-bold text-blue-400 uppercase tracking-tighter">Follow Boost Active</span>
                           </div>
                         )}
                       </CardContent>
@@ -628,16 +714,31 @@ export default function App() {
                             <p className="text-xs font-semibold text-white/40 uppercase tracking-widest">Early Believers</p>
                             <div className="space-y-1">
                               {[1, 2, 3].map(rank => (
-                                <div key={rank} className="flex justify-between items-center p-2 bg-white/5 rounded-lg text-xs">
-                                  <span className="text-white/40">#{rank}</span>
-                                  <span className="font-mono">0x...{Math.random().toString(16).slice(2, 6)}</span>
-                                  <span className="text-purple-500">🥇</span>
+                                <div key={rank} className="flex items-center gap-3 p-2 bg-white/5 rounded-lg text-xs border border-white/5">
+                                  <span className="text-white/40 w-4 font-bold">#{rank}</span>
+                                  <div className="relative">
+                                    <img 
+                                      src={`https://picsum.photos/seed/alpha${rank}/64/64`} 
+                                      alt={`Rank ${rank}`} 
+                                      className="w-6 h-6 rounded-full border border-white/10 object-cover"
+                                      referrerPolicy="no-referrer"
+                                    />
+                                    {rank === 1 && <div className="absolute -top-1 -right-1 text-[8px]">👑</div>}
+                                  </div>
+                                  <span className="font-mono flex-grow text-white/60">0x...{Math.random().toString(16).slice(2, 6)}</span>
+                                  <span className="text-purple-500 font-bold">{rank === 1 ? '🥇' : rank === 2 ? '🥈' : '🥉'}</span>
                                 </div>
                               ))}
-                              <div className="flex justify-between items-center p-2 bg-purple-600 text-white rounded-lg text-xs font-bold">
-                                <span>#{p.position}</span>
-                                <span>YOU 👀</span>
-                                <span>✨</span>
+                              <div className="flex items-center gap-3 p-2 bg-purple-600/20 text-white rounded-lg text-xs font-bold border border-purple-500/30">
+                                <span className="w-4">#{p.position}</span>
+                                <img 
+                                  src={user?.photoURL || ''} 
+                                  alt="You" 
+                                  className="w-6 h-6 rounded-full border border-white/20 object-cover"
+                                  referrerPolicy="no-referrer"
+                                />
+                                <span className="flex-grow">YOU 👀</span>
+                                <span className="animate-pulse">✨</span>
                               </div>
                             </div>
                           </div>
@@ -705,21 +806,21 @@ export default function App() {
             <div className="w-full p-4 bg-white/5 rounded-2xl border border-white/10 text-left">
               <p className="text-xs font-bold text-purple-500 uppercase tracking-widest mb-2">Preview Post</p>
               <p className="text-sm text-white/80 italic">
-                "I just joined {shareModalData.campaignTitle} early at #{shareModalData.position} on AlphaDrop! 🚀 Join the alpha..."
+                "I just joined {shareModalData.campaignTitle} early at #{shareModalData.position} on AlphaDrop! 🚀 Only {shareModalData.maxParticipants - shareModalData.position} spots left..."
               </p>
             </div>
 
             <div className="w-full space-y-3">
               <Button 
-                className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold h-14 rounded-2xl text-lg"
+                className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold h-14 rounded-2xl text-lg shadow-lg shadow-purple-500/20"
                 onClick={() => {
-                  const text = encodeURIComponent(`I'm early! Secured position #${shareModalData.position} for ${shareModalData.campaignTitle} on AlphaDrop. 🚀\n\nJoin the alpha: ${window.location.href}`);
+                  const text = encodeURIComponent(`I'm early! Secured position #${shareModalData.position} for ${shareModalData.campaignTitle} on AlphaDrop. 🚀\n\nOnly ${shareModalData.maxParticipants - shareModalData.position} spots left! Join the alpha: ${window.location.href}`);
                   window.open(`https://warpcast.com/~/compose?text=${text}`, '_blank');
                   setShareModalData(prev => ({ ...prev, isOpen: false }));
                 }}
               >
-                <ExternalLink className="w-5 h-5 mr-2" />
-                Share on Farcaster
+                <Repeat className="w-5 h-5 mr-2" />
+                Share Progress
               </Button>
               <Button 
                 variant="ghost" 
@@ -764,13 +865,24 @@ export default function App() {
               </div>
 
               <div className="w-full p-4 bg-white/5 rounded-2xl border border-white/10 text-left">
-                <p className="text-xs font-bold text-purple-500 uppercase tracking-widest mb-2">Alpha Winners</p>
+                <p className="text-xs font-bold text-purple-500 uppercase tracking-widest mb-3">Alpha Winners</p>
                 <div className="space-y-2">
                   {[1, 2, 3].map(rank => (
-                    <div key={rank} className="flex justify-between items-center text-sm">
-                      <span className="text-white/40">#{rank}</span>
-                      <span className="font-mono">0x...{Math.random().toString(16).slice(2, 6)}</span>
-                      <span className="font-bold text-green-400">+{(resultsModalData.campaign!.rewardPerParticipant * (1.5 / rank)).toFixed(1)} {resultsModalData.campaign!.tokenSymbol}</span>
+                    <div key={rank} className="flex items-center gap-3 text-sm p-2 bg-white/5 rounded-xl border border-white/5">
+                      <span className="text-white/40 font-bold w-4">#{rank}</span>
+                      <img 
+                        src={`https://picsum.photos/seed/winner${rank}/64/64`} 
+                        alt={`Winner ${rank}`} 
+                        className="w-8 h-8 rounded-full border border-white/10 object-cover"
+                        referrerPolicy="no-referrer"
+                      />
+                      <div className="flex-grow">
+                        <p className="font-mono text-xs text-white/60">0x...{Math.random().toString(16).slice(2, 6)}</p>
+                        <p className="text-[10px] text-purple-400 font-bold uppercase tracking-tighter">Early Believer</p>
+                      </div>
+                      <span className="font-bold text-green-400">
+                        +{(resultsModalData.campaign!.rewardPerParticipant * (1.5 / rank)).toFixed(1)} {resultsModalData.campaign!.tokenSymbol}
+                      </span>
                     </div>
                   ))}
                 </div>
