@@ -49,11 +49,8 @@ interface Campaign {
   tokenSymbol: string;
   totalReward: number;
   rewardPerParticipant: number;
-  tasks: {
-    follow?: string;
-    like?: string;
-    recast?: string;
-  };
+  maxParticipants: number;
+  currentParticipants: number;
   status: 'active' | 'completed';
   createdAt: any;
 }
@@ -61,12 +58,11 @@ interface Campaign {
 interface Participant {
   userId: string;
   walletAddress: string;
-  completedTasks: {
-    follow: boolean;
-    like: boolean;
-    recast: boolean;
-  };
+  campaignId: string;
+  position: number;
+  signal: string;
   claimed: boolean;
+  joinedAt: any;
 }
 
 export default function App() {
@@ -83,12 +79,11 @@ export default function App() {
     tokenSymbol: '',
     totalReward: 0,
     rewardPerParticipant: 0,
-    tasks: {
-      follow: '',
-      like: '',
-      recast: ''
-    }
+    maxParticipants: 100,
   });
+
+  const [joiningCampaignId, setJoiningCampaignId] = useState<string | null>(null);
+  const [signal, setSignal] = useState('');
 
   // Auth Listener
   useEffect(() => {
@@ -141,12 +136,13 @@ export default function App() {
       const campaignData = {
         ...newCampaign,
         creatorId: user.uid,
+        currentParticipants: 0,
         status: 'active',
         createdAt: serverTimestamp(),
       };
       await addDoc(collection(db, 'campaigns'), campaignData);
       setIsCreateDialogOpen(false);
-      toast.success('Campaign created successfully!');
+      toast.success('Campaign launched!');
       setNewCampaign({
         title: '',
         description: '',
@@ -154,7 +150,7 @@ export default function App() {
         tokenSymbol: '',
         totalReward: 0,
         rewardPerParticipant: 0,
-        tasks: { follow: '', like: '', recast: '' }
+        maxParticipants: 100,
       });
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'campaigns');
@@ -164,42 +160,43 @@ export default function App() {
   const handleParticipate = async (campaignId: string) => {
     if (!user) return toast.error('Please login first');
     if (!isConnected) return toast.error('Please connect wallet');
+    if (!signal.trim()) return toast.error('Please share why you are early');
 
     try {
+      const campaign = campaigns.find(c => c.id === campaignId);
+      if (!campaign) return;
+
+      // Check if already joined
       const participantRef = doc(db, 'campaigns', campaignId, 'participants', user.uid);
+      
+      const position = campaign.currentParticipants + 1;
+      
       await setDoc(participantRef, {
         userId: user.uid,
         walletAddress: address,
         campaignId: campaignId,
-        completedTasks: {
-          follow: false,
-          like: false,
-          recast: false
-        },
-        claimed: false
+        position: position,
+        signal: signal,
+        claimed: false,
+        joinedAt: serverTimestamp()
       });
-      toast.success('Joined campaign! Complete tasks to earn rewards.');
+
+      // Update campaign participant count
+      const campaignRef = doc(db, 'campaigns', campaignId);
+      await updateDoc(campaignRef, {
+        currentParticipants: position
+      });
+
+      setJoiningCampaignId(null);
+      setSignal('');
+      toast.success(`Position Locked! You are #${position} early.`);
+      
+      // Farcaster Share
+      const text = encodeURIComponent(`I just joined ${campaign.title} early at #${position} on AlphaDrop! 🚀\n\nJoin the alpha: ${window.location.href}`);
+      window.open(`https://warpcast.com/~/compose?text=${text}`, '_blank');
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `campaigns/${campaignId}/participants/${user.uid}`);
     }
-  };
-
-  const verifyTask = async (campaignId: string, taskType: 'follow' | 'like' | 'recast') => {
-    if (!user) return;
-    toast.info(`Verifying ${taskType}...`);
-    
-    // Simulate verification delay
-    setTimeout(async () => {
-      try {
-        const participantRef = doc(db, 'campaigns', campaignId, 'participants', user.uid);
-        await updateDoc(participantRef, {
-          [`completedTasks.${taskType}`]: true
-        });
-        toast.success(`${taskType} verified!`);
-      } catch (error) {
-        handleFirestoreError(error, OperationType.UPDATE, `campaigns/${campaignId}/participants/${user.uid}`);
-      }
-    }, 1500);
   };
 
   const [myParticipations, setMyParticipations] = useState<(Participant & { campaign: Campaign })[]>([]);
@@ -238,10 +235,10 @@ export default function App() {
       <header className="sticky top-0 z-50 border-b border-white/10 bg-black/50 backdrop-blur-xl">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="w-10 h-10 bg-orange-500 rounded-xl flex items-center justify-center shadow-lg shadow-orange-500/20">
-              <ShieldCheck className="text-black w-6 h-6" />
+            <div className="w-10 h-10 bg-purple-600 rounded-xl flex items-center justify-center shadow-lg shadow-purple-500/20">
+              <ShieldCheck className="text-white w-6 h-6" />
             </div>
-            <span className="font-bold text-xl tracking-tight hidden sm:block">Proof of Alpha</span>
+            <span className="font-bold text-xl tracking-tight hidden sm:block">AlphaDrop</span>
           </div>
 
           <div className="flex items-center gap-3">
@@ -282,25 +279,35 @@ export default function App() {
       <main className="container mx-auto px-4 py-12">
         {/* Hero Section */}
         <section className="mb-16 text-center max-w-3xl mx-auto">
+          <div className="flex items-center justify-center gap-2 mb-4">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-purple-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-purple-500"></span>
+            </span>
+            <span className="text-xs font-bold text-purple-500 uppercase tracking-widest">Live Alpha Market</span>
+          </div>
           <motion.h1 
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             className="text-5xl sm:text-7xl font-bold mb-6 tracking-tighter"
           >
-            Airdrops for the <span className="text-orange-500">Alpha</span>
+            Social Alpha Market <br /> powered by <span className="text-blue-500">Base</span>
           </motion.h1>
           <p className="text-white/60 text-lg mb-8 leading-relaxed">
-            Create airdrops for people who react to your posts. Set follow, like, or recast tasks and reward participants with any ERC20 token in a few clicks.
+            Be early. Rank high. Earn rewards. <br />
+            AlphaDrop turns early belief into real value on Base.
           </p>
           
           <div className="flex flex-wrap justify-center gap-4">
             <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-              <DialogTrigger asChild>
-                <Button size="lg" className="bg-orange-500 hover:bg-orange-600 text-black font-bold px-8 h-14 rounded-2xl">
-                  <Plus className="w-5 h-5 mr-2" />
-                  Create Campaign
-                </Button>
-              </DialogTrigger>
+              <DialogTrigger 
+                render={
+                  <Button size="lg" className="bg-purple-600 hover:bg-purple-700 text-white font-bold px-8 h-14 rounded-2xl">
+                    <Plus className="w-5 h-5 mr-2" />
+                    Create Campaign
+                  </Button>
+                }
+              />
               <DialogContent className="bg-[#111] border-white/10 text-white max-w-md">
                 <DialogHeader>
                   <DialogTitle className="text-2xl font-bold">New Airdrop Campaign</DialogTitle>
@@ -350,28 +357,29 @@ export default function App() {
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label>Per Participant</Label>
+                      <Label>Max Participants</Label>
                       <Input 
                         type="number" 
-                        placeholder="10" 
+                        placeholder="100" 
                         className="bg-white/5 border-white/10"
-                        value={newCampaign.rewardPerParticipant}
-                        onChange={e => setNewCampaign({...newCampaign, rewardPerParticipant: Number(e.target.value)})}
+                        value={newCampaign.maxParticipants}
+                        onChange={e => setNewCampaign({...newCampaign, maxParticipants: Number(e.target.value)})}
                       />
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <Label>Twitter Follow (Username)</Label>
+                    <Label>Reward Per Participant (Est.)</Label>
                     <Input 
-                      placeholder="@username" 
+                      type="number" 
+                      placeholder="10" 
                       className="bg-white/5 border-white/10"
-                      value={newCampaign.tasks.follow}
-                      onChange={e => setNewCampaign({...newCampaign, tasks: {...newCampaign.tasks, follow: e.target.value}})}
+                      value={newCampaign.rewardPerParticipant}
+                      onChange={e => setNewCampaign({...newCampaign, rewardPerParticipant: Number(e.target.value)})}
                     />
                   </div>
                 </div>
                 <DialogFooter>
-                  <Button onClick={handleCreateCampaign} className="w-full bg-orange-500 hover:bg-orange-600 text-black font-bold">
+                  <Button onClick={handleCreateCampaign} className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold">
                     Launch Campaign
                   </Button>
                 </DialogFooter>
@@ -387,9 +395,9 @@ export default function App() {
         {/* Stats Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-16">
           {[
-            { label: 'Active Campaigns', value: campaigns.length, icon: Trophy },
-            { label: 'Total Participants', value: '12.4k', icon: Users },
-            { label: 'Rewards Distributed', value: '$450k+', icon: Coins },
+            { label: 'Active Markets', value: campaigns.length, icon: Trophy },
+            { label: 'Early Believers', value: '12.4k', icon: Users },
+            { label: 'Value Distributed', value: '$450k+', icon: Coins },
           ].map((stat, i) => (
             <motion.div 
               key={i}
@@ -398,7 +406,7 @@ export default function App() {
               transition={{ delay: i * 0.1 }}
               className="bg-white/5 border border-white/10 p-6 rounded-3xl"
             >
-              <stat.icon className="w-6 h-6 text-orange-500 mb-4" />
+              <stat.icon className="w-6 h-6 text-purple-500 mb-4" />
               <div className="text-3xl font-bold mb-1">{stat.value}</div>
               <div className="text-white/40 text-sm uppercase tracking-wider font-medium">{stat.label}</div>
             </motion.div>
@@ -409,10 +417,10 @@ export default function App() {
         <Tabs defaultValue="all" className="w-full">
           <div className="flex items-center justify-between mb-8">
             <TabsList className="bg-white/5 border border-white/10 p-1 rounded-xl">
-              <TabsTrigger value="all" className="rounded-lg px-6 data-[state=active]:bg-orange-500 data-[state=active]:text-black">
+              <TabsTrigger value="all" className="rounded-lg px-6 data-[state=active]:bg-purple-600 data-[state=active]:text-white">
                 All Airdrops
               </TabsTrigger>
-              <TabsTrigger value="my" className="rounded-lg px-6 data-[state=active]:bg-orange-500 data-[state=active]:text-black">
+              <TabsTrigger value="my" className="rounded-lg px-6 data-[state=active]:bg-purple-600 data-[state=active]:text-white">
                 My Participations
               </TabsTrigger>
             </TabsList>
@@ -428,46 +436,77 @@ export default function App() {
                     animate={{ opacity: 1, scale: 1 }}
                     transition={{ delay: i * 0.05 }}
                   >
-                    <Card className="bg-[#111] border-white/10 hover:border-orange-500/50 transition-all duration-300 group overflow-hidden">
+                    <Card className="bg-[#111] border-white/10 hover:border-purple-500/50 transition-all duration-300 group overflow-hidden flex flex-col h-full">
                       <div className="absolute top-0 right-0 p-4">
-                        <Badge className="bg-orange-500/10 text-orange-500 border-orange-500/20">
+                        <Badge className="bg-purple-500/10 text-purple-500 border-purple-500/20">
                           {campaign.tokenSymbol}
                         </Badge>
                       </div>
                       <CardHeader>
-                        <CardTitle className="text-xl font-bold group-hover:text-orange-500 transition-colors">
+                        <CardTitle className="text-xl font-bold group-hover:text-purple-500 transition-colors">
                           {campaign.title}
                         </CardTitle>
                         <CardDescription className="text-white/40 line-clamp-2">
-                          {campaign.description || `Earn ${campaign.rewardPerParticipant} ${campaign.tokenSymbol} by completing simple social tasks.`}
+                          {campaign.description || `Earn ${campaign.rewardPerParticipant} ${campaign.tokenSymbol} by being early to this alpha.`}
                         </CardDescription>
                       </CardHeader>
-                      <CardContent className="space-y-4">
+                      <CardContent className="space-y-4 flex-grow">
                         <div className="flex items-center justify-between p-3 bg-white/5 rounded-xl border border-white/10">
                           <div className="flex items-center gap-2">
-                            <Coins className="w-4 h-4 text-orange-500" />
+                            <Coins className="w-4 h-4 text-purple-500" />
                             <span className="text-sm font-medium">Reward Pool</span>
                           </div>
                           <span className="font-bold">{campaign.totalReward} {campaign.tokenSymbol}</span>
                         </div>
                         
                         <div className="space-y-2">
-                          <p className="text-xs font-semibold text-white/40 uppercase tracking-widest">Required Tasks</p>
-                          <div className="flex gap-2">
-                            {campaign.tasks.follow && <Badge variant="secondary" className="bg-white/5 text-white/60"><Twitter className="w-3 h-3 mr-1" /> Follow</Badge>}
-                            {campaign.tasks.like && <Badge variant="secondary" className="bg-white/5 text-white/60"><Heart className="w-3 h-3 mr-1" /> Like</Badge>}
-                            {campaign.tasks.recast && <Badge variant="secondary" className="bg-white/5 text-white/60"><Repeat className="w-3 h-3 mr-1" /> Recast</Badge>}
+                          <div className="flex justify-between text-xs font-semibold text-white/40 uppercase tracking-widest">
+                            <span>Scarcity</span>
+                            <span>{campaign.currentParticipants} / {campaign.maxParticipants}</span>
+                          </div>
+                          <div className="w-full h-2 bg-white/5 rounded-full overflow-hidden">
+                            <motion.div 
+                              initial={{ width: 0 }}
+                              animate={{ width: `${(campaign.currentParticipants / campaign.maxParticipants) * 100}%` }}
+                              className="h-full bg-purple-500"
+                            />
                           </div>
                         </div>
                       </CardContent>
                       <CardFooter>
-                        <Button 
-                          onClick={() => handleParticipate(campaign.id)}
-                          className="w-full bg-white text-black hover:bg-orange-500 hover:text-black transition-all font-bold rounded-xl"
-                        >
-                          Join Airdrop
-                          <ArrowRight className="w-4 h-4 ml-2" />
-                        </Button>
+                        {joiningCampaignId === campaign.id ? (
+                          <div className="w-full space-y-3">
+                            <textarea 
+                              placeholder="Why are you early? (Signal)"
+                              className="w-full bg-black border border-white/10 rounded-xl p-3 text-sm focus:border-purple-500 outline-none transition-colors"
+                              value={signal}
+                              onChange={e => setSignal(e.target.value)}
+                            />
+                            <div className="flex gap-2">
+                              <Button 
+                                variant="ghost" 
+                                className="flex-1"
+                                onClick={() => setJoiningCampaignId(null)}
+                              >
+                                Cancel
+                              </Button>
+                              <Button 
+                                className="flex-[2] bg-purple-600 hover:bg-purple-700 text-white font-bold"
+                                onClick={() => handleParticipate(campaign.id)}
+                              >
+                                Lock Position
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <Button 
+                            onClick={() => setJoiningCampaignId(campaign.id)}
+                            className="w-full bg-white text-black hover:bg-purple-600 hover:text-white transition-all font-bold rounded-xl"
+                          >
+                            Join Early
+                            <ArrowRight className="w-4 h-4 ml-2" />
+                          </Button>
+                        )}
                       </CardFooter>
                     </Card>
                   </motion.div>
@@ -489,7 +528,7 @@ export default function App() {
                     <Card className="bg-[#111] border-white/10 overflow-hidden">
                       <CardHeader>
                         <div className="flex justify-between items-start mb-2">
-                          <Badge className="bg-orange-500 text-black font-bold">
+                          <Badge className="bg-purple-500 text-white font-bold">
                             {p.campaign.tokenSymbol}
                           </Badge>
                           {p.claimed && <Badge className="bg-green-500/20 text-green-500 border-green-500/30">Claimed</Badge>}
@@ -498,68 +537,61 @@ export default function App() {
                       </CardHeader>
                       <CardContent className="space-y-6">
                         <div className="space-y-3">
-                          <p className="text-xs font-semibold text-white/40 uppercase tracking-widest">Task Progress</p>
-                          
-                          {p.campaign.tasks.follow && (
-                            <div className="flex items-center justify-between p-3 bg-white/5 rounded-xl border border-white/10">
-                              <div className="flex items-center gap-3">
-                                <Twitter className="w-4 h-4 text-sky-400" />
-                                <span className="text-sm">Follow {p.campaign.tasks.follow}</span>
-                              </div>
-                              {p.completedTasks.follow ? (
-                                <CheckCircle2 className="w-5 h-5 text-green-500" />
-                              ) : (
-                                <Button size="sm" variant="ghost" className="text-orange-500 hover:text-orange-400 p-0 h-auto" onClick={() => verifyTask(p.campaign.id, 'follow')}>
-                                  Verify
-                                </Button>
-                              )}
+                          <div className="flex items-center justify-between p-4 bg-purple-500/10 rounded-2xl border border-purple-500/20">
+                            <div>
+                              <p className="text-xs font-semibold text-purple-400 uppercase tracking-widest mb-1">Your Position</p>
+                              <p className="text-3xl font-bold text-white">#{p.position}</p>
                             </div>
-                          )}
+                            <div className="text-right">
+                              <p className="text-xs font-semibold text-purple-400 uppercase tracking-widest mb-1">Est. Reward</p>
+                              <p className="text-xl font-bold text-white">{p.campaign.rewardPerParticipant} {p.campaign.tokenSymbol}</p>
+                            </div>
+                          </div>
 
-                          {p.campaign.tasks.like && (
-                            <div className="flex items-center justify-between p-3 bg-white/5 rounded-xl border border-white/10">
-                              <div className="flex items-center gap-3">
-                                <Heart className="w-4 h-4 text-pink-500" />
-                                <span className="text-sm">Like Post</span>
-                              </div>
-                              {p.completedTasks.like ? (
-                                <CheckCircle2 className="w-5 h-5 text-green-500" />
-                              ) : (
-                                <Button size="sm" variant="ghost" className="text-orange-500 hover:text-orange-400 p-0 h-auto" onClick={() => verifyTask(p.campaign.id, 'like')}>
-                                  Verify
-                                </Button>
-                              )}
-                            </div>
-                          )}
+                          <div className="space-y-2">
+                            <p className="text-xs font-semibold text-white/40 uppercase tracking-widest">Your Signal</p>
+                            <p className="text-sm italic text-white/80 bg-white/5 p-3 rounded-xl border border-white/10">
+                              "{p.signal}"
+                            </p>
+                          </div>
 
-                          {p.campaign.tasks.recast && (
-                            <div className="flex items-center justify-between p-3 bg-white/5 rounded-xl border border-white/10">
-                              <div className="flex items-center gap-3">
-                                <Repeat className="w-4 h-4 text-purple-500" />
-                                <span className="text-sm">Recast Cast</span>
+                          <div className="space-y-2">
+                            <p className="text-xs font-semibold text-white/40 uppercase tracking-widest">Early Believers</p>
+                            <div className="space-y-1">
+                              {[1, 2, 3].map(rank => (
+                                <div key={rank} className="flex justify-between items-center p-2 bg-white/5 rounded-lg text-xs">
+                                  <span className="text-white/40">#{rank}</span>
+                                  <span className="font-mono">0x...{Math.random().toString(16).slice(2, 6)}</span>
+                                  <span className="text-purple-500">🥇</span>
+                                </div>
+                              ))}
+                              <div className="flex justify-between items-center p-2 bg-purple-600 text-white rounded-lg text-xs font-bold">
+                                <span>#{p.position}</span>
+                                <span>YOU 👀</span>
+                                <span>✨</span>
                               </div>
-                              {p.completedTasks.recast ? (
-                                <CheckCircle2 className="w-5 h-5 text-green-500" />
-                              ) : (
-                                <Button size="sm" variant="ghost" className="text-orange-500 hover:text-orange-400 p-0 h-auto" onClick={() => verifyTask(p.campaign.id, 'recast')}>
-                                  Verify
-                                </Button>
-                              )}
                             </div>
-                          )}
+                          </div>
                         </div>
 
-                        <div className="pt-4 border-t border-white/5">
-                          <div className="flex justify-between items-center text-sm">
-                            <span className="text-white/40">Potential Reward</span>
-                            <span className="font-bold text-orange-500">{p.campaign.rewardPerParticipant} {p.campaign.tokenSymbol}</span>
-                          </div>
+                        <div className="pt-4 border-t border-white/5 space-y-4">
+                          <Button 
+                            variant="outline" 
+                            className="w-full border-purple-500/20 hover:bg-purple-500/10 text-purple-400 text-xs h-9"
+                            onClick={() => {
+                              const text = encodeURIComponent(`I'm early! Secured position #${p.position} for ${p.campaign.title} on AlphaDrop. 🚀\n\nJoin the alpha: ${window.location.href}`);
+                              window.open(`https://warpcast.com/~/compose?text=${text}`, '_blank');
+                            }}
+                          >
+                            <ExternalLink className="w-3 h-3 mr-2" />
+                            Share Position on Farcaster
+                          </Button>
                         </div>
                       </CardContent>
                       <CardFooter>
                         <Button 
-                          disabled={p.claimed || !Object.values(p.completedTasks).every(v => v === true)}
-                          className="w-full bg-orange-500 hover:bg-orange-600 text-black font-bold disabled:bg-white/5 disabled:text-white/20"
+                          disabled={p.claimed}
+                          className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold disabled:bg-white/5 disabled:text-white/20"
                         >
                           {p.claimed ? 'Rewards Claimed' : 'Claim Rewards'}
                         </Button>
@@ -586,8 +618,8 @@ export default function App() {
       <footer className="border-t border-white/10 py-12 mt-20">
         <div className="container mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-6">
           <div className="flex items-center gap-2">
-            <ShieldCheck className="text-orange-500 w-5 h-5" />
-            <span className="font-bold">PoA</span>
+            <ShieldCheck className="text-purple-500 w-5 h-5" />
+            <span className="font-bold">AlphaDrop</span>
           </div>
           <div className="flex gap-8 text-sm text-white/40">
             <a href="#" className="hover:text-white transition-colors">Documentation</a>

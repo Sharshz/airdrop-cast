@@ -1,6 +1,6 @@
 {
-  "name": "Proof of Alpha (PoA)",
-  "description": "Airdrop management platform on Base chain. Create campaigns with social tasks (follow, like, recast) and reward participants with ERC20 tokens.",
+  "name": "AlphaDrop",
+  "description": "A social alpha market powered by Base and Farcaster. Create airdrops for social engagement and grow your project through viral loops.",
   "requestFramePermissions": [],
   "majorCapabilities": []
 }
