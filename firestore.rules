@@ -1,0 +1,129 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: campaigns
+    // Document ID: auto-generated
+    // Fields:
+    //   - creatorId: string (required, immutable) - UID of the campaign creator
+    //   - title: string (required, 1-100 chars)
+    //   - description: string (optional, 0-500 chars)
+    //   - tokenAddress: string (required, 42 chars) - ERC20 token address on Base
+    //   - tokenSymbol: string (required, 1-10 chars)
+    //   - totalReward: number (required, positive)
+    //   - rewardPerParticipant: number (required, positive)
+    //   - tasks: map (required)
+    //     - follow: string (optional) - Twitter handle or link
+    //     - like: string (optional) - Tweet ID or link
+    //     - recast: string (optional) - Farcaster cast ID or link
+    //   - status: string (required, enum: ['active', 'completed'])
+    //   - createdAt: timestamp (required, immutable)
+    //
+    // Sub-collection: campaigns/{campaignId}/participants
+    // Document ID: userId
+    // Fields:
+    //   - campaignId: string (required, immutable)
+    //   - userId: string (required, immutable)
+    //   - walletAddress: string (required, 42 chars)
+    //   - completedTasks: map (required)
+    //     - follow: bool
+    //     - like: bool
+    //     - recast: bool
+    //   - claimed: bool (required)
+    //   - claimedAt: timestamp (optional)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidWallet(address) {
+      return address is string && address.matches("^0x[a-fA-F0-9]{40}$");
+    }
+
+    function isRecent(time) {
+      return time > request.time - duration.value(5, 'm') && time < request.time + duration.value(5, 'm');
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidCampaign(data) {
+      return data.keys().hasAll(['creatorId', 'title', 'tokenAddress', 'tokenSymbol', 'totalReward', 'rewardPerParticipant', 'status', 'createdAt']) &&
+             data.creatorId is string &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 100 &&
+             data.tokenAddress is string && isValidWallet(data.tokenAddress) &&
+             data.tokenSymbol is string && data.tokenSymbol.size() >= 1 && data.tokenSymbol.size() <= 10 &&
+             data.totalReward is number && data.totalReward > 0 &&
+             data.rewardPerParticipant is number && data.rewardPerParticipant > 0 &&
+             data.status in ['active', 'completed'] &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidParticipant(data) {
+      return data.keys().hasAll(['campaignId', 'userId', 'walletAddress', 'completedTasks', 'claimed']) &&
+             data.campaignId is string &&
+             data.userId is string &&
+             data.walletAddress is string && isValidWallet(data.walletAddress) &&
+             data.completedTasks is map &&
+             data.claimed is bool;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /campaigns/{campaignId} {
+      allow read: if true; // Campaigns are public
+      
+      allow create: if isAuthenticated() && 
+                      isValidCampaign(request.resource.data) &&
+                      request.resource.data.creatorId == request.auth.uid &&
+                      isRecent(request.resource.data.createdAt);
+      
+      allow update: if isAuthenticated() && 
+                      isValidCampaign(request.resource.data) &&
+                      resource.data.creatorId == request.auth.uid &&
+                      request.resource.data.creatorId == resource.data.creatorId &&
+                      request.resource.data.createdAt == resource.data.createdAt;
+
+      match /participants/{participantId} {
+        allow read: if isAuthenticated() && (isOwner(participantId) || get(/databases/$(database)/documents/campaigns/$(campaignId)).data.creatorId == request.auth.uid);
+        
+        allow create: if isAuthenticated() && 
+                        isOwner(participantId) &&
+                        isValidParticipant(request.resource.data) &&
+                        request.resource.data.userId == request.auth.uid &&
+                        request.resource.data.campaignId == campaignId;
+        
+        allow update: if isAuthenticated() && 
+                        (isOwner(participantId) || get(/databases/$(database)/documents/campaigns/$(campaignId)).data.creatorId == request.auth.uid) &&
+                        isValidParticipant(request.resource.data) &&
+                        request.resource.data.userId == resource.data.userId &&
+                        request.resource.data.campaignId == resource.data.campaignId;
+      }
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow write: if isOwner(userId);
+    }
+  }
+}

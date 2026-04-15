@@ -1,0 +1,61 @@
+{
+  "entities": {
+    "Campaign": {
+      "title": "Campaign",
+      "description": "Airdrop campaign details",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "creatorId": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "tokenAddress": { "type": "string" },
+        "tokenSymbol": { "type": "string" },
+        "totalReward": { "type": "number" },
+        "rewardPerParticipant": { "type": "number" },
+        "tasks": {
+          "type": "object",
+          "properties": {
+            "follow": { "type": "string" },
+            "like": { "type": "string" },
+            "recast": { "type": "string" }
+          }
+        },
+        "status": { "type": "string", "enum": ["active", "completed"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["creatorId", "tokenAddress", "totalReward", "rewardPerParticipant"]
+    },
+    "Participant": {
+      "title": "Participant",
+      "description": "User participation in a campaign",
+      "type": "object",
+      "properties": {
+        "campaignId": { "type": "string" },
+        "userId": { "type": "string" },
+        "walletAddress": { "type": "string" },
+        "completedTasks": {
+          "type": "object",
+          "properties": {
+            "follow": { "type": "boolean" },
+            "like": { "type": "boolean" },
+            "recast": { "type": "boolean" }
+          }
+        },
+        "claimed": { "type": "boolean" },
+        "claimedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["campaignId", "userId", "walletAddress"]
+    }
+  },
+  "firestore": {
+    "/campaigns/{campaignId}": {
+      "schema": "Campaign",
+      "description": "Collection of airdrop campaigns"
+    },
+    "/campaigns/{campaignId}/participants/{participantId}": {
+      "schema": "Participant",
+      "description": "Sub-collection of participants for a specific campaign"
+    }
+  }
+}
