@@ -1,0 +1,6 @@
+{
+  "name": "Proof of Alpha (PoA)",
+  "description": "Airdrop management platform on Base chain. Create campaigns with social tasks (follow, like, recast) and reward participants with ERC20 tokens.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
