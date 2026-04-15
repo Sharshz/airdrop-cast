@@ -51,6 +51,7 @@ interface Campaign {
   rewardPerParticipant: number;
   maxParticipants: number;
   currentParticipants: number;
+  recastTask?: string;
   status: 'active' | 'completed';
   createdAt: any;
 }
@@ -80,10 +81,20 @@ export default function App() {
     totalReward: 0,
     rewardPerParticipant: 0,
     maxParticipants: 100,
+    recastTask: '',
   });
 
   const [joiningCampaignId, setJoiningCampaignId] = useState<string | null>(null);
   const [signal, setSignal] = useState('');
+  const [shareModalData, setShareModalData] = useState<{
+    isOpen: boolean;
+    campaignTitle: string;
+    position: number;
+  }>({ isOpen: false, campaignTitle: '', position: 0 });
+  const [resultsModalData, setResultsModalData] = useState<{
+    isOpen: boolean;
+    campaign: Campaign | null;
+  }>({ isOpen: false, campaign: null });
 
   // Auth Listener
   useEffect(() => {
@@ -151,6 +162,7 @@ export default function App() {
         totalReward: 0,
         rewardPerParticipant: 0,
         maxParticipants: 100,
+        recastTask: '',
       });
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'campaigns');
@@ -191,11 +203,35 @@ export default function App() {
       setSignal('');
       toast.success(`Position Locked! You are #${position} early.`);
       
-      // Farcaster Share
-      const text = encodeURIComponent(`I just joined ${campaign.title} early at #${position} on AlphaDrop! 🚀\n\nJoin the alpha: ${window.location.href}`);
-      window.open(`https://warpcast.com/~/compose?text=${text}`, '_blank');
+      // Open Share Modal
+      setShareModalData({
+        isOpen: true,
+        campaignTitle: campaign.title,
+        position: position
+      });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `campaigns/${campaignId}/participants/${user.uid}`);
+    }
+  };
+
+  const handleCompleteCampaign = async (campaignId: string) => {
+    if (!user) return;
+    try {
+      const campaignRef = doc(db, 'campaigns', campaignId);
+      await updateDoc(campaignRef, {
+        status: 'completed'
+      });
+      
+      const campaign = campaigns.find(c => c.id === campaignId);
+      if (campaign) {
+        setResultsModalData({
+          isOpen: true,
+          campaign: { ...campaign, status: 'completed' }
+        });
+      }
+      toast.success('Campaign completed successfully!');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `campaigns/${campaignId}`);
     }
   };
 
@@ -377,6 +413,15 @@ export default function App() {
                       onChange={e => setNewCampaign({...newCampaign, rewardPerParticipant: Number(e.target.value)})}
                     />
                   </div>
+                  <div className="space-y-2">
+                    <Label>Recast Task (Cast URL or ID) - Optional</Label>
+                    <Input 
+                      placeholder="https://warpcast.com/..." 
+                      className="bg-white/5 border-white/10"
+                      value={newCampaign.recastTask}
+                      onChange={e => setNewCampaign({...newCampaign, recastTask: e.target.value})}
+                    />
+                  </div>
                 </div>
                 <DialogFooter>
                   <Button onClick={handleCreateCampaign} className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold">
@@ -472,9 +517,33 @@ export default function App() {
                             />
                           </div>
                         </div>
+
+                        {campaign.recastTask && (
+                          <div className="flex items-center gap-2 p-2 bg-purple-500/5 rounded-lg border border-purple-500/10">
+                            <Repeat className="w-3 h-3 text-purple-500" />
+                            <span className="text-[10px] font-bold text-purple-400 uppercase tracking-tighter">Recast Boost Active</span>
+                          </div>
+                        )}
                       </CardContent>
                       <CardFooter>
-                        {joiningCampaignId === campaign.id ? (
+                        {campaign.status === 'completed' ? (
+                          <Button 
+                            variant="outline"
+                            className="w-full border-purple-500/20 text-purple-400 font-bold rounded-xl"
+                            onClick={() => setResultsModalData({ isOpen: true, campaign })}
+                          >
+                            View Results
+                            <Trophy className="w-4 h-4 ml-2" />
+                          </Button>
+                        ) : user?.uid === campaign.creatorId ? (
+                          <Button 
+                            onClick={() => handleCompleteCampaign(campaign.id)}
+                            className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl"
+                          >
+                            Complete Campaign
+                            <CheckCircle2 className="w-4 h-4 ml-2" />
+                          </Button>
+                        ) : joiningCampaignId === campaign.id ? (
                           <div className="w-full space-y-3">
                             <textarea 
                               placeholder="Why are you early? (Signal)"
@@ -613,6 +682,123 @@ export default function App() {
           </TabsContent>
         </Tabs>
       </main>
+
+      {/* Share Modal */}
+      <Dialog 
+        open={shareModalData.isOpen} 
+        onOpenChange={(open) => setShareModalData(prev => ({ ...prev, isOpen: open }))}
+      >
+        <DialogContent className="bg-[#111] border-purple-500/20 text-white max-w-sm text-center p-8">
+          <div className="flex flex-col items-center gap-6">
+            <div className="w-20 h-20 bg-purple-600 rounded-3xl flex items-center justify-center shadow-2xl shadow-purple-500/40 animate-bounce">
+              <Trophy className="text-white w-10 h-10" />
+            </div>
+            
+            <div className="space-y-2">
+              <DialogTitle className="text-3xl font-bold tracking-tighter">Position Locked!</DialogTitle>
+              <DialogDescription className="text-white/60 text-lg">
+                You are <span className="text-purple-400 font-bold">#{shareModalData.position}</span> early to <br />
+                <span className="text-white font-medium">{shareModalData.campaignTitle}</span>
+              </DialogDescription>
+            </div>
+
+            <div className="w-full p-4 bg-white/5 rounded-2xl border border-white/10 text-left">
+              <p className="text-xs font-bold text-purple-500 uppercase tracking-widest mb-2">Preview Post</p>
+              <p className="text-sm text-white/80 italic">
+                "I just joined {shareModalData.campaignTitle} early at #{shareModalData.position} on AlphaDrop! 🚀 Join the alpha..."
+              </p>
+            </div>
+
+            <div className="w-full space-y-3">
+              <Button 
+                className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold h-14 rounded-2xl text-lg"
+                onClick={() => {
+                  const text = encodeURIComponent(`I'm early! Secured position #${shareModalData.position} for ${shareModalData.campaignTitle} on AlphaDrop. 🚀\n\nJoin the alpha: ${window.location.href}`);
+                  window.open(`https://warpcast.com/~/compose?text=${text}`, '_blank');
+                  setShareModalData(prev => ({ ...prev, isOpen: false }));
+                }}
+              >
+                <ExternalLink className="w-5 h-5 mr-2" />
+                Share on Farcaster
+              </Button>
+              <Button 
+                variant="ghost" 
+                className="w-full text-white/40 hover:text-white"
+                onClick={() => setShareModalData(prev => ({ ...prev, isOpen: false }))}
+              >
+                Maybe later
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Results Modal */}
+      <Dialog 
+        open={resultsModalData.isOpen} 
+        onOpenChange={(open) => setResultsModalData(prev => ({ ...prev, isOpen: open }))}
+      >
+        <DialogContent className="bg-[#111] border-purple-500/20 text-white max-w-md text-center p-8">
+          {resultsModalData.campaign && (
+            <div className="flex flex-col items-center gap-6">
+              <div className="w-20 h-20 bg-green-500 rounded-3xl flex items-center justify-center shadow-2xl shadow-green-500/40">
+                <CheckCircle2 className="text-black w-10 h-10" />
+              </div>
+              
+              <div className="space-y-2">
+                <DialogTitle className="text-3xl font-bold tracking-tighter">Campaign Successful!</DialogTitle>
+                <DialogDescription className="text-white/60 text-lg">
+                  <span className="text-white font-medium">{resultsModalData.campaign.title}</span> has ended.
+                </DialogDescription>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 w-full">
+                <div className="p-4 bg-white/5 rounded-2xl border border-white/10">
+                  <p className="text-xs font-bold text-purple-500 uppercase tracking-widest mb-1">Distributed</p>
+                  <p className="text-xl font-bold">{resultsModalData.campaign.totalReward} {resultsModalData.campaign.tokenSymbol}</p>
+                </div>
+                <div className="p-4 bg-white/5 rounded-2xl border border-white/10">
+                  <p className="text-xs font-bold text-purple-500 uppercase tracking-widest mb-1">Believers</p>
+                  <p className="text-xl font-bold">{resultsModalData.campaign.currentParticipants}</p>
+                </div>
+              </div>
+
+              <div className="w-full p-4 bg-white/5 rounded-2xl border border-white/10 text-left">
+                <p className="text-xs font-bold text-purple-500 uppercase tracking-widest mb-2">Alpha Winners</p>
+                <div className="space-y-2">
+                  {[1, 2, 3].map(rank => (
+                    <div key={rank} className="flex justify-between items-center text-sm">
+                      <span className="text-white/40">#{rank}</span>
+                      <span className="font-mono">0x...{Math.random().toString(16).slice(2, 6)}</span>
+                      <span className="font-bold text-green-400">+{(resultsModalData.campaign!.rewardPerParticipant * (1.5 / rank)).toFixed(1)} {resultsModalData.campaign!.tokenSymbol}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="w-full space-y-3">
+                <Button 
+                  className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold h-14 rounded-2xl text-lg"
+                  onClick={() => {
+                    const text = encodeURIComponent(`✅ ${resultsModalData.campaign!.title} Successful!\n\n${resultsModalData.campaign!.totalReward} ${resultsModalData.campaign!.tokenSymbol} distributed to ${resultsModalData.campaign!.currentParticipants} early believers on AlphaDrop. 🚀\n\nCheck the results: ${window.location.href}`);
+                    window.open(`https://warpcast.com/~/compose?text=${text}`, '_blank');
+                  }}
+                >
+                  <ExternalLink className="w-5 h-5 mr-2" />
+                  Share Results on Farcaster
+                </Button>
+                <Button 
+                  variant="ghost" 
+                  className="w-full text-white/40 hover:text-white"
+                  onClick={() => setResultsModalData(prev => ({ ...prev, isOpen: false }))}
+                >
+                  Close
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Footer */}
       <footer className="border-t border-white/10 py-12 mt-20">
